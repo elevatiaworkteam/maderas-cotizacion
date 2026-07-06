@@ -42,8 +42,10 @@ function parseYcalcular(body) {
   const material = extraer(t, 'Material') || '';
   const tablero = extraer(t, 'Tablero') || '';
   const espesor = num(extraer(t, 'Espesor'));
-  const mCorte = num(extraer(t, 'Metros de corte'));
+  const mCorteM = t.match(/Metros\s*\(est[^\n:]*:?\s*([\d.,]+)/i);
+  const mCorte = mCorteM ? num(mCorteM[1]) : num(extraer(t, 'Metros de corte'));
   const mCanteado = num(extraer(t, 'Metros de canteado'));
+  const cortes = num(extraer(t, 'Cortes de tablero'));
 
   const tCorte = tarifaCorte(espesor);
   const subCorte = mCorte * tCorte;
@@ -52,7 +54,7 @@ function parseYcalcular(body) {
   const itbis = subtotal * ITBIS;
   const total = subtotal + itbis;
 
-  return { cliente, rnc, tel, material, tablero, espesor, mCorte, mCanteado, tCorte, subCorte, subCanteado, subtotal, itbis, total };
+  return { cliente, rnc, tel, material, tablero, espesor, cortes, mCorte, mCanteado, tCorte, subCorte, subCanteado, subtotal, itbis, total };
 }
 
 function fecha() {
@@ -115,7 +117,7 @@ function construirPDF(c, res) {
     .text('Importe', W - M - 112, y + 8, { width: 100, align: 'right' });
   y += 26;
   const filas = [
-    ['Corte de tablero', c.mCorte.toFixed(2) + ' m lineales (espesor ' + (c.espesor || '—') + ' mm)', 'RD$ ' + c.tCorte + '/m', money(c.subCorte)],
+    ['Corte de tablero', c.mCorte.toFixed(2) + ' m' + (c.cortes ? ' · ' + c.cortes + ' cortes' : '') + ' (esp. ' + (c.espesor || '—') + ' mm)', 'RD$ ' + c.tCorte + '/m', money(c.subCorte)],
     ['Canteado', c.mCanteado.toFixed(2) + ' m lineales', 'RD$ ' + TARIFA_CANTEADO + '/m', money(c.subCanteado)]
   ];
   doc.font('Helvetica').fillColor(INK).fontSize(10.5);
