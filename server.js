@@ -1,0 +1,187 @@
+const express = require('express');
+const PDFDocument = require('pdfkit');
+const path = require('path');
+const fs = require('fs');
+
+const app = express();
+app.use(express.json({ limit: '1mb' }));
+
+const LOGO = path.join(__dirname, 'assets', 'logo.png');
+const RNC_EMPRESA = '131161839';
+
+// ---- Paleta de marca ----
+const BROWN = '#5E4528', BROWN2 = '#6B4F2A', CARAMEL = '#B5835A', ACCENT = '#EA580C';
+const CREAM = '#FAF4EA', LINE = '#E6D8C2', MUTED = '#8A7A60', INK = '#3D2E1C';
+
+function money(n) {
+  return 'RD$ ' + Number(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+function num(s) { const m = String(s == null ? '' : s).replace(',', '.').match(/-?\d+(\.\d+)?/); return m ? parseFloat(m[0]) : 0; }
+
+// Tarifa de corte por metro lineal según espesor (mm)
+function tarifaCorte(esp) {
+  if (esp > 30) return 30;
+  if (esp >= 21) return 23.985;
+  return 21.615; // 3–20mm (por defecto)
+}
+const TARIFA_CANTEADO = 2.25;
+const ITBIS = 0.18;
+
+// Extrae un campo del mensaje de la web
+function extraer(texto, etiqueta) {
+  const re = new RegExp(etiqueta + '\\s*:?\\s*(.+)', 'i');
+  const m = texto.match(re);
+  return m ? m[1].trim() : '';
+}
+
+function parseYcalcular(body) {
+  const t = String(body.mensaje || body.texto || '');
+  const cliente = extraer(t, 'Cliente') || body.nombre || 'Cliente';
+  const rnc = extraer(t, 'RNC/C[eé]dula') || extraer(t, 'RNC') || '';
+  const tel = extraer(t, 'Tel[eé]fono') || body.telefono || '';
+  const material = extraer(t, 'Material') || '';
+  const tablero = extraer(t, 'Tablero') || '';
+  const espesor = num(extraer(t, 'Espesor'));
+  const mCorte = num(extraer(t, 'Metros de corte'));
+  const mCanteado = num(extraer(t, 'Metros de canteado'));
+
+  const tCorte = tarifaCorte(espesor);
+  const subCorte = mCorte * tCorte;
+  const subCanteado = mCanteado * TARIFA_CANTEADO;
+  const subtotal = subCorte + subCanteado;
+  const itbis = subtotal * ITBIS;
+  const total = subtotal + itbis;
+
+  return { cliente, rnc, tel, material, tablero, espesor, mCorte, mCanteado, tCorte, subCorte, subCanteado, subtotal, itbis, total };
+}
+
+function fecha() {
+  const d = new Date();
+  const p = (x) => String(x).padStart(2, '0');
+  return `${p(d.getDate())}/${p(d.getMonth() + 1)}/${d.getFullYear()}`;
+}
+function numeroCot() {
+  const d = new Date();
+  return `COT-${d.getFullYear()}-${String(Date.now()).slice(-5)}`;
+}
+
+function construirPDF(c, res) {
+  const doc = new PDFDocument({ size: 'A4', margin: 0 });
+  doc.pipe(res);
+  const W = 595.28, M = 45;
+  const cot = numeroCot();
+
+  // --- Encabezado ---
+  try { doc.image(LOGO, M, 45, { height: 62 }); } catch (e) {}
+  doc.fontSize(13).fillColor(BROWN).font('Helvetica-Bold').text('Maderas Ibéricas', W - M - 260, 46, { width: 260, align: 'right' });
+  doc.fontSize(9).fillColor(MUTED).font('Helvetica')
+    .text('RNC: ' + RNC_EMPRESA, W - M - 260, 64, { width: 260, align: 'right' })
+    .text('Avda. Jacinto Mañón 17, Plaza 17, Piantini', { width: 260, align: 'right' })
+    .text('Santo Domingo, R.D.', { width: 260, align: 'right' })
+    .text('Tel: +1 809 957 6500 · info@finsawood.com', { width: 260, align: 'right' });
+  doc.moveTo(M, 120).lineTo(W - M, 120).lineWidth(2.5).strokeColor(BROWN2).stroke();
+
+  // --- Título ---
+  doc.fontSize(28).fillColor(BROWN).font('Helvetica-Bold').text('COTIZACIÓN', M, 138);
+  doc.fontSize(9.5).fillColor(MUTED).font('Helvetica')
+    .text('No. ' + cot, W - M - 200, 140, { width: 200, align: 'right' })
+    .text('Fecha: ' + fecha(), { width: 200, align: 'right' })
+    .text('Válida por: 15 días', { width: 200, align: 'right' });
+  // barra acento
+  doc.rect(M, 178, W - 2 * M, 4).fill(ACCENT);
+
+  // --- Cliente ---
+  let y = 198;
+  doc.roundedRect(M, y, W - 2 * M, 46, 6).fillAndStroke(CREAM, LINE);
+  const cols = [[M + 16, 'CLIENTE', c.cliente], [M + 200, 'RNC / CÉDULA', c.rnc || '—'], [M + 360, 'TELÉFONO', c.tel || '—']];
+  cols.forEach(([x, lab, val]) => {
+    doc.fontSize(7.5).fillColor(CARAMEL).font('Helvetica-Bold').text(lab, x, y + 10);
+    doc.fontSize(11).fillColor(INK).font('Helvetica-Bold').text(val, x, y + 22, { width: 170 });
+  });
+
+  // --- Subtítulo servicio ---
+  y += 62;
+  doc.fontSize(9.5).fillColor(MUTED).font('Helvetica')
+    .text('Servicio de corte y canteo' + (c.material ? ' — ' + c.material : '') + (c.tablero ? ' · Tablero ' + c.tablero : ''), M, y, { width: W - 2 * M });
+
+  // --- Tabla ---
+  y += 22;
+  const colX = { concepto: M + 12, detalle: M + 150, tarifa: W - M - 200, importe: W - M - 12 };
+  doc.rect(M, y, W - 2 * M, 26).fill(BROWN2);
+  doc.fontSize(9.5).fillColor('#fff').font('Helvetica-Bold')
+    .text('Concepto', colX.concepto, y + 8)
+    .text('Detalle', colX.detalle, y + 8)
+    .text('Tarifa', colX.tarifa - 60, y + 8, { width: 120, align: 'right' })
+    .text('Importe', W - M - 112, y + 8, { width: 100, align: 'right' });
+  y += 26;
+  const filas = [
+    ['Corte de tablero', c.mCorte.toFixed(2) + ' m lineales (espesor ' + (c.espesor || '—') + ' mm)', 'RD$ ' + c.tCorte + '/m', money(c.subCorte)],
+    ['Canteado', c.mCanteado.toFixed(2) + ' m lineales', 'RD$ ' + TARIFA_CANTEADO + '/m', money(c.subCanteado)]
+  ];
+  doc.font('Helvetica').fillColor(INK).fontSize(10.5);
+  filas.forEach(([a, b, tar, imp]) => {
+    doc.fillColor(INK).font('Helvetica').text(a, colX.concepto, y + 9, { width: 135 });
+    doc.fillColor('#5b4a34').text(b, colX.detalle, y + 9, { width: 210 });
+    doc.text(tar, W - M - 232, y + 9, { width: 120, align: 'right' });
+    doc.font('Helvetica-Bold').fillColor(INK).text(imp, W - M - 112, y + 9, { width: 100, align: 'right' });
+    doc.moveTo(M, y + 34).lineTo(W - M, y + 34).lineWidth(0.7).strokeColor('#EADFCE').stroke();
+    y += 34;
+  });
+
+  // --- Totales ---
+  y += 12;
+  const tx = W - M - 250;
+  const linea = (lab, val, bold) => {
+    doc.font(bold ? 'Helvetica-Bold' : 'Helvetica').fontSize(bold ? 10.5 : 10).fillColor(bold ? INK : MUTED)
+      .text(lab, tx, y, { width: 130 });
+    doc.font('Helvetica-Bold').fillColor(INK).text(val, tx + 120, y, { width: 130, align: 'right' });
+    y += 20;
+  };
+  linea('Subtotal', money(c.subtotal));
+  linea('ITBIS (18%)', money(c.itbis));
+  // caja total
+  doc.roundedRect(tx - 4, y - 2, 258, 30, 5).fill(BROWN);
+  doc.fontSize(14).fillColor('#fff').font('Helvetica-Bold').text('TOTAL', tx + 6, y + 6);
+  doc.text(money(c.total), tx + 6, y + 6, { width: 236, align: 'right' });
+  y += 44;
+
+  // --- Nota ---
+  const noteH = 46;
+  doc.rect(M, y, 4, noteH).fill(ACCENT);
+  doc.roundedRect(M + 4, y, W - 2 * M - 4, noteH, 4).fill('#FFF7EF');
+  doc.fontSize(9).fillColor('#7A5A3A').font('Helvetica')
+    .text('Cotización estimada del servicio de corte y canteo. No incluye el precio de los tableros. Los cortes especiales (curvo, fresa, express, meganite) se cotizan aparte. El valor exacto se confirma en el taller.',
+      M + 16, y + 10, { width: W - 2 * M - 28 });
+
+  // --- Pie ---
+  const fy = 790;
+  doc.moveTo(M, fy).lineTo(W - M, fy).lineWidth(0.7).strokeColor(LINE).stroke();
+  doc.fontSize(8.5).fillColor(MUTED).font('Helvetica')
+    .text('Maderas Ibéricas · Piantini · Haina · Santo Domingo Este   |   +1 809 957 6500 · info@finsawood.com', M, fy + 8, { width: W - 2 * M, align: 'center' })
+    .text('Gracias por su preferencia.', { width: W - 2 * M, align: 'center' });
+
+  doc.end();
+}
+
+app.get('/', (req, res) => res.send('Maderas Cotización PDF · OK'));
+
+// Genera el PDF y lo devuelve como archivo (binario)
+app.post('/cotizacion', (req, res) => {
+  try {
+    const c = parseYcalcular(req.body || {});
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'inline; filename="Cotizacion-Maderas.pdf"');
+    construirPDF(c, res);
+  } catch (e) {
+    res.status(500).json({ error: String(e && e.message || e) });
+  }
+});
+
+// Variante: devuelve también los totales calculados en JSON (para pruebas)
+app.post('/calcular', (req, res) => {
+  try { res.json(parseYcalcular(req.body || {})); }
+  catch (e) { res.status(500).json({ error: String(e) }); }
+});
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log('Cotización PDF en puerto ' + PORT));
