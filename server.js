@@ -397,16 +397,21 @@ app.post('/enviar-recurso', async (req, res) => {
     const convId = b.conversation_id;
     if (!convId) return res.json({ ok: false, reason: 'sin_conversacion' });
     const raw = (b.recurso || '').toString();
-    let claves = raw.split(',').map(s => s.trim()).filter(Boolean).map(k => {
-      const l = k.toLowerCase();
-      if (l.includes('novedad')) return 'novedades';
-      if (l.includes('dominic')) return 'carta-dominicana';
-      if (l.includes('carta') || l.includes('color') || l.includes('finsa')) return 'carta-finsa';
-      return k;
-    });
-    // "carta de colores" en general => manda las dos cartas
-    if (/color|carta/i.test(raw) && !/dominic/i.test(raw)) claves.push('carta-dominicana');
-    claves = [...new Set(claves)].filter(k => RECURSOS[k]);
+    let claves;
+    if (/\btodos?\b|\btodas?\b|los cat[aá]logos|^\s*cat[aá]logos?\s*$/i.test(raw)) {
+      claves = Object.keys(RECURSOS); // Ver catálogos = manda TODOS
+    } else {
+      claves = raw.split(',').map(s => s.trim()).filter(Boolean).map(k => {
+        const l = k.toLowerCase();
+        if (l.includes('novedad')) return 'novedades';
+        if (l.includes('dominic')) return 'carta-dominicana';
+        if (l.includes('carta') || l.includes('color') || l.includes('finsa')) return 'carta-finsa';
+        return k;
+      });
+      // "carta de colores" en general => manda las dos cartas
+      if (/color|carta/i.test(raw) && !/dominic/i.test(raw)) claves.push('carta-dominicana');
+      claves = [...new Set(claves)].filter(k => RECURSOS[k]);
+    }
     if (!claves.length) return res.json({ ok: false, reason: 'recurso_desconocido' });
     const enviados = [];
     for (const k of claves) {
