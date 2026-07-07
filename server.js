@@ -383,5 +383,45 @@ app.post('/calcular', (req, res) => {
   catch (e) { res.status(500).json({ error: String(e) }); }
 });
 
+// ==== Envío de catálogos/recursos PDF directo al chat (sin link) ====
+const RECURSOS_BASE = 'https://maderasibericascorte.com/recursos';
+const RECURSOS = {
+  'carta-finsa':      { file: 'carta-colores-finsa.pdf',      nombre: 'Carta de Colores Finsa.pdf',            texto: '📖 Carta de colores Finsa' },
+  'carta-dominicana': { file: 'carta-colores-dominicana.pdf', nombre: 'Carta de Colores Finsa Dominicana.pdf', texto: '📖 Carta de colores Finsa Dominicana' },
+  'novedades':        { file: 'novedades-finsa-2026.pdf',     nombre: 'Novedades Finsa 2026.pdf',               texto: '✨ Novedades Finsa 2026' }
+};
+
+app.post('/enviar-recurso', async (req, res) => {
+  try {
+    const b = req.body || {};
+    const convId = b.conversation_id;
+    if (!convId) return res.json({ ok: false, reason: 'sin_conversacion' });
+    const raw = (b.recurso || '').toString();
+    let claves = raw.split(',').map(s => s.trim()).filter(Boolean).map(k => {
+      const l = k.toLowerCase();
+      if (l.includes('novedad')) return 'novedades';
+      if (l.includes('dominic')) return 'carta-dominicana';
+      if (l.includes('carta') || l.includes('color') || l.includes('finsa')) return 'carta-finsa';
+      return k;
+    });
+    // "carta de colores" en general => manda las dos cartas
+    if (/color|carta/i.test(raw) && !/dominic/i.test(raw)) claves.push('carta-dominicana');
+    claves = [...new Set(claves)].filter(k => RECURSOS[k]);
+    if (!claves.length) return res.json({ ok: false, reason: 'recurso_desconocido' });
+    const enviados = [];
+    for (const k of claves) {
+      const r = RECURSOS[k];
+      const resp = await fetch(`${RECURSOS_BASE}/${r.file}`);
+      if (!resp.ok) continue;
+      const buf = Buffer.from(await resp.arrayBuffer());
+      await subirAChatwoot(convId, buf, r.nombre, r.texto);
+      enviados.push(k);
+    }
+    res.json({ ok: enviados.length > 0, enviados });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: String(e && e.message || e) });
+  }
+});
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log('Cotización PDF en puerto ' + PORT));
