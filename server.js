@@ -351,12 +351,13 @@ app.post('/cotizacion-productos', async (req, res) => {
     const pdf = await construirPDFProductos(data, incluidos, totales);
     if (b.debug) { res.setHeader('Content-Type', 'application/pdf'); return res.end(pdf); }
     const filename = ('Cotizacion ' + data.cliente).replace(/[\r\n"\/]+/g, ' ').trim().slice(0, 50) + '.pdf';
-    let enviado = false, errCW = null;
+    let enviado = false;
     if (b.conversation_id) {
       try { await subirAChatwoot(b.conversation_id, pdf, filename, '📄 Aquí tienes tu cotización. Cualquier duda, con gusto te ayudo.'); enviado = true; }
-      catch (e) { errCW = String(e.message || e); }
+      catch (e) { console.error('Chatwoot upload error:', String(e.message || e)); }
     }
-    res.json({ ok: true, enviado, chatwoot_error: errCW, incluidos: incluidos.length, omitidos: omitidos.map(o => o.descripcion || o.codigo).filter(Boolean), totales });
+    // Respuesta SIN montos: el bot nunca debe ver ni decir precios.
+    res.json({ ok: true, enviado, productos_cotizados: incluidos.length, omitidos: omitidos.map(o => o.descripcion || o.codigo).filter(Boolean) });
   } catch (e) {
     res.status(500).json({ ok: false, error: String(e && e.message || e) });
   }
