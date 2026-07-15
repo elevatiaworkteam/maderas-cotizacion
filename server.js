@@ -388,7 +388,8 @@ const RECURSOS_BASE = 'https://maderasibericascorte.com/recursos';
 const RECURSOS = {
   'carta-finsa':      { file: 'carta-colores-finsa.pdf',      nombre: 'Carta de Colores Finsa.pdf',            texto: '📖 Carta de colores Finsa' },
   'carta-dominicana': { file: 'carta-colores-dominicana.pdf', nombre: 'Carta de Colores Finsa Dominicana.pdf', texto: '📖 Carta de colores Finsa Dominicana' },
-  'novedades':        { file: 'novedades-finsa-2026.pdf',     nombre: 'Novedades Finsa 2026.pdf',               texto: '✨ Novedades Finsa 2026' }
+  'novedades':        { file: 'novedades-finsa-2026.pdf',     nombre: 'Novedades Finsa 2026.pdf',               texto: '✨ Novedades Finsa 2026' },
+  'riepe':            { file: 'riepe-catalogo.pdf',        nombre: 'Catalogo RIEPE.pdf',                     texto: '🧴 Catálogo RIEPE (limpiadores, desmoldeantes y colas)' }
 };
 
 app.post('/enviar-recurso', async (req, res) => {
@@ -403,7 +404,8 @@ app.post('/enviar-recurso', async (req, res) => {
     } else {
       claves = raw.split(',').map(s => s.trim()).filter(Boolean).map(k => {
         const l = k.toLowerCase();
-        if (l.includes('novedad')) return 'novedades';
+        if (l.includes('riepe') || l.includes('limpiador') || l.includes('antiadherente') || l.includes('desmold')) return 'riepe';
+      if (l.includes('novedad')) return 'novedades';
         if (l.includes('dominic')) return 'carta-dominicana';
         if (l.includes('carta') || l.includes('color') || l.includes('finsa')) return 'carta-finsa';
         return k;
