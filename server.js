@@ -4,7 +4,7 @@ const path = require('path');
 const fs = require('fs');
 
 const app = express();
-app.use(express.json({ limit: '1mb' }));
+app.use(express.json({ limit: '8mb' }));
 
 const LOGO = path.join(__dirname, 'assets', 'logo.png');
 const RNC_EMPRESA = '131161839';
@@ -34,6 +34,11 @@ const CW_BASE = 'https://app.chatwoot.com';
 const CW_ACCOUNT = process.env.CHATWOOT_ACCOUNT || '168113';
 const CW_TOKEN = process.env.CHATWOOT_TOKEN || 'jbPNpq2gdAdmE6fae6QUKUpE';
 
+// ---- Imágenes de distribución de cortes (por código de referencia, TTL 6h) ----
+const CORTES = {};
+function limpiarCortes(){ const now=Date.now(); for(const k in CORTES){ if(now - CORTES[k].at > 6*3600*1000) delete CORTES[k]; } }
+
+
 // Extrae un campo del mensaje de la web
 function extraer(texto, etiqueta) {
   const re = new RegExp(etiqueta + '\\s*:?\\s*(.+)', 'i');
@@ -61,7 +66,8 @@ function parseYcalcular(body) {
   const itbis = subtotal * ITBIS;
   const total = subtotal + itbis;
 
-  return { cliente, rnc, tel, material, tablero, espesor, cortes, mCorte, mCanteado, tCorte, subCorte, subCanteado, subtotal, itbis, total };
+  const refCorte = (extraer(t, 'Ref corte') || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  return { cliente, rnc, tel, material, tablero, espesor, cortes, mCorte, mCanteado, tCorte, subCorte, subCanteado, subtotal, itbis, total, refCorte };
 }
 
 function fecha() {
@@ -169,6 +175,18 @@ function construirPDF(c, res) {
     .text('Maderas Ibéricas · Piantini · Haina · Santo Domingo Este   |   +1 809 957 6500 · info@finsawood.com', M, fy + 8, { width: W - 2 * M, align: 'center' })
     .text('Gracias por su preferencia.', { width: W - 2 * M, align: 'center' });
 
+  // --- Página de distribución de cortes (si hay imagen guardada) ---
+  if (c.refCorte && CORTES[c.refCorte]) {
+    try {
+      doc.addPage();
+      try { doc.image(LOGO, M, 42, { height: 40 }); } catch (e) {}
+      doc.fontSize(17).fillColor(BROWN).font('Helvetica-Bold').text('Distribución de cortes', M, 96);
+      doc.fontSize(9.5).fillColor(MUTED).font('Helvetica')
+        .text('Cliente: ' + (c.cliente || '') + (c.material ? '  ·  ' + c.material : ''), M, 120, { width: W - 2 * M });
+      doc.rect(M, 138, W - 2 * M, 3).fill(ACCENT);
+      doc.image(CORTES[c.refCorte].img, M, 156, { fit: [W - 2 * M, 630], align: 'center' });
+    } catch (e) {}
+  }
   doc.end();
 }
 
@@ -428,6 +446,20 @@ app.post('/enviar-recurso', async (req, res) => {
   } catch (e) {
     res.status(500).json({ ok: false, error: String(e && e.message || e) });
   }
+});
+
+// Guarda la imagen de distribución de cortes que manda la página web (por referencia)
+app.post('/guardar-corte', (req, res) => {
+  try {
+    const b = req.body || {};
+    const ref = String(b.ref || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+    let img = String(b.img || '');
+    if (!ref || !img) return res.json({ ok: false, reason: 'faltan_datos' });
+    img = img.replace(/^data:image\/\w+;base64,/, '');
+    CORTES[ref] = { img: Buffer.from(img, 'base64'), at: Date.now() };
+    limpiarCortes();
+    res.json({ ok: true, ref });
+  } catch (e) { res.status(500).json({ ok: false, error: String(e && e.message || e) }); }
 });
 
 const PORT = process.env.PORT || 3000;
