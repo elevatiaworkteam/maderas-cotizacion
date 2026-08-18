@@ -338,12 +338,12 @@ function construirPDFProductos(data, incluidos, totales) {
   });
 }
 
-async function subirAChatwoot(convId, buffer, filename, content) {
+async function subirAChatwoot(convId, buffer, filename, content, mime = 'application/pdf') {
   const url = `${CW_BASE}/api/v1/accounts/${CW_ACCOUNT}/conversations/${convId}/messages`;
   const form = new FormData();
   form.append('message_type', 'outgoing');
   form.append('content', content);
-  form.append('attachments[]', new Blob([buffer], { type: 'application/pdf' }), filename);
+  form.append('attachments[]', new Blob([buffer], { type: mime }), filename);
   const r = await fetch(url, { method: 'POST', headers: { api_access_token: CW_TOKEN }, body: form });
   if (!r.ok) throw new Error('Chatwoot ' + r.status + ' ' + (await r.text()).slice(0, 200));
   return true;
@@ -407,7 +407,8 @@ const RECURSOS = {
   'carta-finsa':      { file: 'carta-colores-finsa.pdf',      nombre: 'Carta de Colores Finsa.pdf',            texto: '📖 Carta de colores Finsa' },
   'carta-dominicana': { file: 'carta-colores-dominicana.pdf', nombre: 'Carta de Colores Finsa Dominicana.pdf', texto: '📖 Carta de colores Finsa Dominicana' },
   'novedades':        { file: 'novedades-finsa-2026.pdf',     nombre: 'Novedades Finsa 2026.pdf',               texto: '✨ Novedades Finsa 2026' },
-  'riepe':            { file: 'riepe-catalogo.pdf',        nombre: 'Catalogo RIEPE.pdf',                     texto: '🧴 Catálogo RIEPE (limpiadores, desmoldeantes y colas)' }
+  'riepe':            { file: 'riepe-catalogo.pdf',        nombre: 'Catalogo RIEPE.pdf',                     texto: '🧴 Catálogo RIEPE (limpiadores, desmoldeantes y colas)' },
+  'bienvenida':       { file: 'bienvenida-lucy.jpg',       nombre: 'Conoce a Lucy - FINSA.jpg',              texto: '', local: true, mime: 'image/jpeg' }
 };
 
 app.post('/enviar-recurso', async (req, res) => {
@@ -436,10 +437,16 @@ app.post('/enviar-recurso', async (req, res) => {
     const enviados = [];
     for (const k of claves) {
       const r = RECURSOS[k];
-      const resp = await fetch(`${RECURSOS_BASE}/${r.file}`);
-      if (!resp.ok) continue;
-      const buf = Buffer.from(await resp.arrayBuffer());
-      await subirAChatwoot(convId, buf, r.nombre, r.texto);
+      let buf;
+      if (r.local) {
+        try { buf = fs.readFileSync(path.join(__dirname, 'assets', r.file)); }
+        catch (e) { continue; }
+      } else {
+        const resp = await fetch(`${RECURSOS_BASE}/${r.file}`);
+        if (!resp.ok) continue;
+        buf = Buffer.from(await resp.arrayBuffer());
+      }
+      await subirAChatwoot(convId, buf, r.nombre, r.texto, r.mime || 'application/pdf');
       enviados.push(k);
     }
     res.json({ ok: enviados.length > 0, enviados });
